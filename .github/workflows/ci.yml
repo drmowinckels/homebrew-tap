@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The bump script is the only moving part in this repo, and its failure mode
+  # is quiet — a wrong checksum surfaces as a mismatch on a user's machine
+  # long after the run went green. So it carries a real test suite.
+  script:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: shellcheck
+        run: shellcheck scripts/*.sh test/*.sh
+      - name: tests
+        run: bash test/bump-cask.test.sh
+
+  casks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Homebrew/actions/setup-homebrew@master
+      - name: brew style
+        run: brew style Casks
+      # Proves each cask actually loads: `brew style` is RuboCop over the Ruby
+      # source and will happily pass a file whose DSL is wrong.
+      - name: casks parse
+        run: |
+          for cask in Casks/*.rb; do
+            echo "--- ${cask}"
+            brew info --cask "$cask"
+          done
+
+  workflows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color

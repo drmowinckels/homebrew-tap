@@ -1,0 +1,158 @@
+name: Bump casks
+
+# Polls every app repository for its latest stable release and commits any
+# cask that has fallen behind straight to `main`.
+#
+# The direction matters. The obvious design is the other one — each app repo
+# pushes a bump here when it publishes a release — and it is worse on two
+# counts:
+#
+#   1. It needs a cross-repo credential. GITHUB_TOKEN is scoped to the single
+#      repository running the workflow, regardless of who owns the others, so
+#      every app repo would carry a PAT or deploy key for this one. Polling
+#      public release metadata needs no secret at all.
+#   2. It cannot recover. `drmowinckels/entracte`'s in-repo bump failed on
+#      eleven consecutive releases without anyone noticing, leaving the cask
+#      stranded behind the current release (drmowinckels/entracte#349). This
+#      job re-derives the whole desired state every hour, so a tick that fails
+#      for any reason is repaired by the next one.
+#
+# One job for all casks rather than a matrix: concurrent jobs pushing to `main`
+# would race each other for no benefit, and a single commit per tick reads
+# better in the log.
+
+on:
+  schedule:
+    # Hourly, off the top of the hour — scheduled runs at :00 queue behind
+    # everyone else's.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: bump-casks
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          # The commit step rebases if main moved underneath it, and a shallow
+          # clone has no merge base to rebase onto.
+          fetch-depth: 0
+
+      - name: Bump every cask that has fallen behind
+        env:
+          # Only lifts the unauthenticated API rate limit; every repository
+          # polled here is public, so no cross-repo grant is involved.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bumped=()
+          for cask in Casks/*.rb; do
+            token=$(basename "$cask" .rb)
+            # No `|| true`: an unconfigured or unreachable cask must red the
+            # run. Skipping quietly is the failure this design exists to
+            # avoid.
+            scripts/bump-cask.sh "$token"
+            if ! git diff --quiet -- "$cask"; then
+              bumped+=("$token")
+            fi
+          done
+
+          if [ ${#bumped[@]} -eq 0 ]; then
+            echo "Every cask is already current." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          printf 'BUMPED=%s\n' "${bumped[*]}" >> "$GITHUB_ENV"
+
+      - name: Commit and push
+        if: env.BUMPED != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          summary=""
+          for token in $BUMPED; do
+            version=$(sed -n -E 's/^  version "([^"]+)"$/\1/p' "Casks/${token}.rb" | head -1)
+            git add "Casks/${token}.rb"
+            summary="${summary}${token} ${version}, "
+          done
+          summary="${summary%, }"
+
+          git commit -m "Bump ${summary}"
+
+          # Another commit can land between the checkout and the push. Rebase
+          # and retry; a conflict means someone hand-edited a cask while this
+          # ran, so fail rather than guess which side wins.
+          pushed=""
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              pushed="$attempt"
+              break
+            fi
+            echo "push rejected (attempt ${attempt}) — rebasing onto origin/main"
+            if ! git pull --rebase origin main; then
+              git rebase --abort || true
+              echo "::error::cask bump conflicts with a concurrent edit — resolve by hand"
+              exit 1
+            fi
+          done
+
+          [ -n "$pushed" ] || { echo "::error::could not push after 3 attempts"; exit 1; }
+
+          {
+            echo "### Bumped ${summary}"
+            echo
+            echo "Pushed to \`main\` as $(git rev-parse --short HEAD) (attempt ${pushed})."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Nothing downstream consumes this workflow, so a red run is invisible
+      # unless it says something — which is precisely how entracte#349 went
+      # unnoticed for eleven releases. The next tick will retry, so a single
+      # transient failure is self-healing; the issue exists for the failures
+      # that are not (a renamed release asset, a revoked token, a cask with no
+      # configuration).
+      - name: Report a failed bump
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Cask bump failed"
+
+          # Build the body in a file rather than via `body=$(cat <<EOF …)`:
+          # bash tracks quotes through a heredoc nested inside `$( )`, so a
+          # lone apostrophe in the prose turns the whole step into a syntax
+          # error. That exact bug shipped into entracte's equivalent step,
+          # which — being `if: failure()` only — stayed invisible until the
+          # day it was needed.
+          cat > "${RUNNER_TEMP}/failure.md" <<EOF
+          The hourly cask bump failed.
+
+          **Run:** ${RUN_URL}
+
+          The next scheduled tick retries automatically, so a transient
+          failure needs nothing from you — close this issue. If it keeps
+          failing, a cask in \`Casks/\` has either no \`case\` entry in
+          \`scripts/bump-cask.sh\` or an upstream release whose asset names no
+          longer match the template there.
+          EOF
+
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            | jq -r --arg t "$title" '.[] | select(.title == $t) | .number' | head -1)
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP}/failure.md"
+          else
+            gh issue create --title "$title" --body-file "${RUNNER_TEMP}/failure.md"
+          fi
