@@ -26,8 +26,13 @@ jobs:
       - name: tests
         run: bash test/bump-cask.test.sh
 
+  # macOS, not Linux. These casks are macOS-only (`depends_on :macos`) and key
+  # their checksums off `arch arm:/intel:`, which linuxbrew cannot resolve — it
+  # reports "a sha256 stanza is required" for a cask that audits clean on a Mac.
+  # Auditing in the environment the cask actually targets is the whole point,
+  # and macOS runners are free on a public repository.
   casks:
-    runs-on: ubuntu-24.04
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: Homebrew/actions/setup-homebrew@2026.09.28.1
