@@ -81,6 +81,15 @@ fi
 
 version="${tag#v}"
 
+# `$version` is interpolated into sed expressions and asset names below. It
+# comes from the GitHub API rather than from a user, so this is not an
+# injection guard — git simply permits characters in a ref name (`|` among
+# them) that would corrupt a sed expression into a confusing failure several
+# steps later. Reject the shape up front instead.
+if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z._-]+$'; then
+  die "refusing tag '${tag}': version '${version}' has characters outside [0-9A-Za-z._-]"
+fi
+
 current=$(sed -n -E 's/^  version "([^"]+)"$/\1/p' "$cask" | head -1)
 [ -n "$current" ] || die "could not read the current version out of ${cask}"
 
@@ -102,17 +111,15 @@ work=$(mktemp -d)
 # shellcheck disable=SC2064  # expand $work now; it is gone by trap time otherwise
 trap "rm -rf '$work'" EXIT
 
-have_sums=0
-if gh release download "$tag" --repo "$repo" \
-  --pattern SHA256SUMS.txt --dir "$work" >/dev/null 2>&1; then
-  have_sums=1
-fi
+sums_file="${work}/SHA256SUMS.txt"
+gh release download "$tag" --repo "$repo" \
+  --pattern SHA256SUMS.txt --dir "$work" >/dev/null 2>&1 || true
 
 sha_for() {
   local asset="$1" sum=""
 
-  if [ "$have_sums" = 1 ]; then
-    sum=$(awk -v f="$asset" '$2 == f { print $1 }' "${work}/SHA256SUMS.txt")
+  if [ -f "$sums_file" ]; then
+    sum=$(awk -v f="$asset" '$2 == f { print $1 }' "$sums_file")
   fi
 
   if [ -z "$sum" ]; then
@@ -146,11 +153,14 @@ for entry in "${assets[@]}"; do
 done
 
 rewrite "s|^(  version \")[^\"]+(\")|\1${version}\2|" "$cask"
-grep -qF "  version \"${version}\"" "$cask" || die "version line did not land in ${cask}"
 
-if grep -qF "$current" "$cask"; then
-  die "${cask} still mentions the old version ${current} after the bump"
-fi
+# Re-read the stanza rather than grepping for the version string. A substring
+# search answers the wrong question: bumping a long-stranded cask from 0.0.1 to
+# 0.0.14 leaves "0.0.1" findable inside "0.0.14", so a `grep -F "$current"`
+# guard fails the run precisely in the recover-from-neglect case this whole
+# design exists to handle.
+after=$(sed -n -E 's/^  version "([^"]+)"$/\1/p' "$cask" | head -1)
+[ "$after" = "$version" ] || die "version line reads '${after}' after the bump, expected '${version}'"
 
 echo "${token}: ${current} -> ${version}"
 for s in "${sums[@]}"; do

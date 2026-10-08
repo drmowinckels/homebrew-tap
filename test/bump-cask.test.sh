@@ -175,6 +175,22 @@ else
 fi
 teardown
 
+# --- a long-stranded cask recovers ----------------------------------------
+# 0.0.1 is a substring of 0.0.14, so a post-write guard that greps for the old
+# version string fails here while the bump itself was perfectly correct. This is
+# the exact case the hourly poller exists to repair, so it gets its own test.
+setup
+dual_arch_cask "0.0.1"
+export STUB_TAG="v0.0.14"
+if out=$(run_bump entracte 2>&1); then
+  cask=$(cat "$sandbox/Casks/entracte.rb")
+  expect_contains "recovers a cask stranded many releases back" "$cask" 'version "0.0.14"'
+  expect_contains "reports the long transition" "$out" "0.0.1 -> 0.0.14"
+else
+  no "recovers a cask stranded many releases back" "$out"
+fi
+teardown
+
 # --- the no-op path --------------------------------------------------------
 setup
 dual_arch_cask "0.0.13"

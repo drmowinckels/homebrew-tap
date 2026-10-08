@@ -54,19 +54,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bumped=()
+          failed=()
+
+          # Each cask is bumped independently and a failure is recorded rather
+          # than thrown. Letting one cask abort the step would mean a single
+          # app with renamed release assets silently freezes every *other*
+          # app's updates — in a shared tap that is the worst failure
+          # available, and it would look like nothing was wrong. The run still
+          # goes red at the end; it just delivers the bumps it managed first.
           for cask in Casks/*.rb; do
             token=$(basename "$cask" .rb)
-            # No `|| true`: an unconfigured or unreachable cask must red the
-            # run. Skipping quietly is the failure this design exists to
-            # avoid.
-            scripts/bump-cask.sh "$token"
-            if ! git diff --quiet -- "$cask"; then
-              bumped+=("$token")
+            if scripts/bump-cask.sh "$token"; then
+              if ! git diff --quiet -- "$cask"; then
+                bumped+=("$token")
+              fi
+            else
+              failed+=("$token")
+              # bump-cask.sh writes checksums before the version, so a failure
+              # between the two leaves the file half-bumped. Never commit that.
+              git checkout -- "$cask"
             fi
           done
 
+          if [ ${#failed[@]} -gt 0 ]; then
+            printf 'FAILED=%s\n' "${failed[*]}" >> "$GITHUB_ENV"
+          fi
+
           if [ ${#bumped[@]} -eq 0 ]; then
-            echo "Every cask is already current." >> "$GITHUB_STEP_SUMMARY"
+            echo "No cask needed bumping." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -114,6 +129,14 @@ jobs:
             echo
             echo "Pushed to \`main\` as $(git rev-parse --short HEAD) (attempt ${pushed})."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Deliberately after the push: a cask that could not be bumped must red
+      # the run, but not at the cost of the casks that were bumped fine.
+      - name: Fail if any cask could not be bumped
+        if: env.FAILED != ''
+        run: |
+          echo "::error::could not bump: ${FAILED}"
+          exit 1
 
       # Nothing downstream consumes this workflow, so a red run is invisible
       # unless it says something — which is precisely how entracte#349 went
