@@ -45,10 +45,33 @@ jobs:
       # `brew trust` on it, so the tap under test is this very commit.
       - name: casks parse
         run: |
+          status=0
           for cask in Casks/*.rb; do
             token=$(basename "$cask" .rb)
             echo "--- ${token}"
-            brew info --cask "drmowinckels/tap/${token}"
+            if ! out=$(brew info --cask "drmowinckels/tap/${token}" 2>&1); then
+              echo "$out"
+              status=1
+              continue
+            fi
+            echo "$out"
+
+            # `brew info` exits 0 on a deprecated stanza and merely warns, and
+            # `brew style` is RuboCop over the source so it cannot see a
+            # *runtime* deprecation either. Between them a deprecated
+            # `verified:` url parameter sailed through a fully green run and
+            # was only caught by hand on a developer's machine. Grep for it.
+            if printf '%s' "$out" | grep -qiE "deprecated|Please report this issue"; then
+              echo "::error::${token}: brew reported a deprecation or defect — see the output above"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: brew audit
+        run: |
+          for cask in Casks/*.rb; do
+            brew audit --cask --strict "drmowinckels/tap/$(basename "$cask" .rb)"
           done
 
   workflows:

@@ -4,11 +4,17 @@ Homebrew casks for [Dr. Mowinckel's](https://drmowinckels.io) macOS apps.
 
 ```sh
 brew tap drmowinckels/tap
+brew trust drmowinckels/tap
 brew install --cask entracte
 ```
 
 The repository is named `homebrew-tap`, so Homebrew resolves it from the short
 name alone — no URL argument, unlike the per-repo taps this replaces.
+
+`brew trust` is not optional and not specific to this tap: current Homebrew
+refuses to load a cask from any third-party tap until you trust it, with
+`Refusing to load cask … from untrusted tap`. Trusting a tap says you accept
+that its casks run code from somewhere outside Homebrew's own repositories.
 
 ## What's here
 
