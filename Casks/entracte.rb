@@ -7,7 +7,6 @@ cask "entracte" do
 
   url "https://github.com/drmowinckels/entracte/releases/download/v#{version}/Entracte_#{version}_#{arch}.dmg",
       verified: "github.com/drmowinckels/entracte/"
-
   name "Entracte"
   desc "Cross-platform break reminder named after the theatre interval between acts"
   homepage "https://github.com/drmowinckels/entracte"
@@ -17,7 +16,7 @@ cask "entracte" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
 
   app "Entracte.app"
   binary "#{appdir}/Entracte.app/Contents/MacOS/entracte"
@@ -25,9 +24,9 @@ cask "entracte" do
   zap trash: [
     "~/Library/Application Support/io.drmowinckels.entracte",
     "~/Library/Caches/io.drmowinckels.entracte",
+    "~/Library/LaunchAgents/io.drmowinckels.entracte.plist",
     "~/Library/Logs/io.drmowinckels.entracte",
     "~/Library/Preferences/io.drmowinckels.entracte.plist",
-    "~/Library/LaunchAgents/io.drmowinckels.entracte.plist",
     "~/Library/Saved Application State/io.drmowinckels.entracte.savedState",
   ]
 end
