@@ -20,7 +20,7 @@ jobs:
   script:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: shellcheck
         run: shellcheck scripts/*.sh test/*.sh
       - name: tests
@@ -29,8 +29,8 @@ jobs:
   casks:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: Homebrew/actions/setup-homebrew@master
+      - uses: actions/checkout@v7
+      - uses: Homebrew/actions/setup-homebrew@2026.09.28.1
       - name: brew style
         run: brew style Casks
       # Proves each cask actually loads: `brew style` is RuboCop over the Ruby
@@ -45,7 +45,7 @@ jobs:
   workflows:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: actionlint
         uses: docker://rhysd/actionlint:1.7.12
         with:
