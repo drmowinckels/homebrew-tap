@@ -34,20 +34,15 @@ jobs:
       - name: brew style
         run: brew style Casks
 
-      # `brew info --cask ./Casks/foo.rb` is rejected outright — Homebrew
-      # refuses to load a cask that is not in a tap. Copying the checkout into
-      # Homebrew's Taps directory makes *this* commit the tap, which is the
-      # point: `brew tap drmowinckels/tap` would clone `main` from GitHub and
-      # so would check the wrong code on a pull request.
-      - name: Install the working copy as a tap
-        run: |
-          tap="$(brew --repository)/Library/Taps/drmowinckels/homebrew-tap"
-          mkdir -p "$(dirname "$tap")"
-          cp -R "$GITHUB_WORKSPACE" "$tap"
-          brew tap
-
       # Proves each cask actually loads. `brew style` is RuboCop over the Ruby
       # source and will happily pass a file whose DSL is wrong.
+      #
+      # Referenced by tap name, not by path: `brew info --cask ./Casks/foo.rb`
+      # is rejected outright ("Homebrew requires casks to be in a tap"). No
+      # setup needed to make that work — because this repository is named
+      # `homebrew-<something>`, setup-homebrew has already symlinked the
+      # checkout into `Library/Taps/drmowinckels/homebrew-tap` and run
+      # `brew trust` on it, so the tap under test is this very commit.
       - name: casks parse
         run: |
           for cask in Casks/*.rb; do
